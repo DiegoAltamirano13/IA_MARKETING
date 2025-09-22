@@ -108,7 +108,7 @@ def get_openrouter_config():
     api_key = key_manager.get_fresh_key()
     logger.info(api_key)
     return {
-        "api_url": "https://openrouter.ai/api/v1/chat/completions",
+        "api_url": "https://openrouter.ai/api/v1/chat/completions",  # ✅ URL CORRECTA
         "api_key": api_key,
         "app_name": "ALMAssist-Chatbot",
         "app_url": "https://09a4e4543e5d.ngrok-free.app/",
