@@ -8,6 +8,7 @@ from database import DatabaseManager, SecurityError
 
 # ✅ Importar los nuevos módulos
 from modules.ubicaciones_module import UbicacionesModule
+from modules.servicios_module import ServiciosModule
 from utils.context_manager import ContextManager
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,8 @@ class MotorRespuestasAvanzado:
         
         # ✅ Inicializar módulos
         self.modulos = [
-            UbicacionesModule(self.db_manager, self.context_manager)
+            UbicacionesModule(self.db_manager, self.context_manager),
+            ServiciosModule(self.db_manager, self.context_manager)  # ← Nuevo módulo
             # Aquí agregarás más módulos después: ServiciosModule, InventarioModule, etc.
         ]
         
@@ -244,49 +246,66 @@ class MotorRespuestasAvanzado:
 
     def usar_deepseek_openrouter(self, mensaje_usuario):
         """
-        Usa DeepSeek a través de OpenRouter con detección inteligente de intenciones
+        Usa DeepSeek a través de OpenRouter con el contexto completo de ARGO
         """
         try:
-            # Corregir ortografía del mensaje
             mensaje_corregido = self.corregir_ortografia(mensaje_usuario)
             
+            # Obtener contexto de la conversación
+            contexto_conversacion = self.context_manager.obtener_contexto(user_id="default")
+            
             prompt = f"""
-            Eres ALMAssist, asistente especializado de ARGO Almacenadora. 
+                Eres ALMAssist, asistente especializado de ARGO Almacenadora, actuando como ejecutivo comercial de prospección y atención a clientes.
 
-            CONTEXTO DE LA EMPRESA:
-            {EMPRESA_INFO}
+                OBJETIVO PRINCIPAL:
+                Proporcionar información clara, precisa y profesional sobre servicios especializados de almacenaje y logística como Almacén General de Depósito, captando solicitudes de información, quejas o requerimientos de clientes activos.
 
-            INSTRUCCIONES ESPECIALES:
-            1. ANALIZA si la pregunta está relacionada con UBICACIONES, SUCURSALES o ALMACENES
-            2. Si detectas que pregunta por ubicaciones, responde SOLO con: "UBICACIONES: [tipo_consulta]|[ubicacion_extraida]"
-            3. Para otras consultas, responde normalmente
+                CONTEXTO DE LA EMPRESA:
+                {CONTEXTO_GENERAL}
 
-            TIPOS DE CONSULTA DE UBICACIONES:
-            - "GENERAL": Si pregunta por todas las ubicaciones, ej: "¿Dónde tienen almacenes?" → "UBICACIONES: GENERAL|"
-            - "ESPECIFICA": Si menciona una ubicación concreta, ej: "almacenes en Querétaro" → "UBICACIONES: ESPECIFICA|Querétaro"  
-            - "DETALLES": Si pide detalles específicos como direcciones, teléfonos, horarios → "UBICACIONES: DETALLES|"
-            - "REFERENCIA": Si usa números como "1", "2", "primera", "segunda" → "UBICACIONES: REFERENCIA|1"
+                MARCO LEGAL DE REFERENCIA:
+                • Ley General de Organizaciones y Actividades Auxiliares del Crédito
+                • Ley General de Títulos y Operaciones de Crédito  
+                • Ley Aduanera
 
-            FORMATO DE RESPUESTA PARA UBICACIONES:
-            Si es sobre ubicaciones, responde EXACTAMENTE: "UBICACIONES: [GENERAL|ESPECIFICA|DETALLES|REFERENCIA]|[ubicacion_o_referencia]"
+                UBICACIONES DISPONIBLES (SOLO estas):
+                - CENTRAL CÓRDOBA: Corporativo Córdoba, Almacén Peñuela, Almacén Atoyaquillo
+                - PLAZA GOLFO: Almacén Ulúa, Almacén Acacias  
+                - PLAZA PUEBLA: Almacén Cuautlancingo
+                - PLAZA MÉXICO: Almacén Tabla Honda, Almacén Ceylan, Almacén Pantaco
+                - PLAZA BAJÍO: Almacén Querétaro
+                - PLAZA OCCIDENTE: Almacén Guadalajara
+                - PLAZA PENÍNSULA: Almacén Mérida
+                - PLAZA NORESTE: Almacén Monterrey
 
-            EJEMPLOS COMPLETOS:
-            - "¿Dónde están sus almacenes?" → "UBICACIONES: GENERAL|"
-            - "Tienen sucursal en Guadalajara?" → "UBICACIONES: ESPECIFICA|Guadalajara"  
-            - "Dirección y teléfono de Monterrey" → "UBICACIONES: DETALLES|Monterrey"
-            - "Quiero la primera ubicación" → "UBICACIONES: REFERENCIA|primera"
-            - "Muéstrame la número 2" → "UBICACIONES: REFERENCIA|2"
-            - "Información de la 3" → "UBICACIONES: REFERENCIA|3"
-            - "La ubicación 5" → "UBICACIONES: REFERENCIA|5"
-            - "Quiero saber sobre servicios" → (respuesta normal)
+                INSTRUCCIONES ESPECÍFICAS:
+                1. TONO: Formal, cordial y empático (ejecutivo comercial). Sin lenguaje emotivo ni promocional.
+                2. Para UBICACIONES: Responder EXACTAMENTE "UBICACIONES: [TIPO]|[VALOR]"
+                - TIPOS: GENERAL, ESPECIFICA, DETALLES, REFERENCIA, CERCANA
+                3. Si preguntan por ubicación cercana: "UBICACIONES: CERCANA|"
+                4. Si mencionan ciudad/estado: "UBICACIONES: ESPECIFICA|[CIUDAD]"
+                5. Para SERVICIOS: "SERVICIOS: [TIPO]|[DETALLE]"
+                6. Para HORARIOS: "HORARIOS: |"
+                7. Para RESTRICCIONES: "RESTRICCIONES: |"
+                8. Para CONTACTO HUMANO: "CONTACTO: EJECUTIVO|"
+                9. Si no tienes información suficiente: Ofrecer contacto de ejecutivo humano inmediatamente.
+                10. Las respuestas deben estar respaldadas por el marco legal mencionado cuando sea pertinente.
 
-            UBICACIONES DISPONIBLES (para referencia):
-            📍 BAJIO, 📍 CÓRDOBA, 📍 GOLFO, 📍 MÉXICO, 📍 NORESTE, 📍 OCCIDENTE, 📍 PENINSULA, 📍 PUEBLA
+                EJEMPLOS DE RESPUESTAS:
+                - "¿Dónde tienen almacenes?" → "UBICACIONES: GENERAL|"
+                - "Almacenes en Veracruz" → "UBICACIONES: ESPECIFICA|Veracruz"
+                - "Quiero la más cercana" → "UBICACIONES: CERCANA|"
+                - "Almacén Ulúa" → "UBICACIONES: ESPECIFICA|Ulúa"
+                - "¿Qué servicios ofrecen?" → "SERVICIOS: GENERAL|"
+                - "Necesito hablar con alguien" → "CONTACTO: EJECUTIVO|"
+                - "No entiendo" → "Le comento que..."
+                - "¿A qué hora abren?" → "HORARIOS: | "
+                - "¿Qué no se puede almacenar?" → "RESTRICCIONES: |"
 
-            Pregunta del usuario: "{mensaje_corregido}"
+                Pregunta: "{mensaje_corregido}"
 
-            Responde:
-            """
+                Responde SOLO con el formato especificado, manteniendo el tono formal de ejecutivo comercial y refiriendo al marco legal cuando corresponda:
+                """
 
             headers = {
                 'Authorization': f'Bearer {OPENROUTER_API_KEY}',
@@ -328,7 +347,27 @@ class MotorRespuestasAvanzado:
                     ubicacion_extraida=ubicacion_extraida  # ← Nuevo parámetro
                 )
                 return respuesta_real
-            
+            # AÑADIR ESTA SECCIÓN PARA DETECTAR SERVICIOS
+            elif respuesta.startswith("SERVICIOS:"):
+                partes = respuesta.split("|")
+                tipo_servicio = partes[0].split(":")[1].strip()
+                servicio_especifico = partes[1].strip() if len(partes) > 1 else None
+                
+                logger.info(f"DeepSeek detectó: tipo_servicio={tipo_servicio}, servicio_especifico={servicio_especifico}")
+                
+                # Redirigir al módulo de servicios
+                from modules.servicios_module import ServiciosModule
+                servicios_module = ServiciosModule(self.db_manager, self.context_manager)
+                
+                # Pasar tanto el tipo como el servicio específico
+                respuesta_real = servicios_module.procesar_con_tipo(
+                    mensaje_corregido,
+                    tipo_servicio,
+                    user_id="default",
+                    servicio_especifico=servicio_especifico
+                )
+                return respuesta_real
+                
             # Si no es sobre ubicaciones, retornar la respuesta normal de DeepSeek
             return respuesta
                 
@@ -346,29 +385,218 @@ class MotorRespuestasAvanzado:
         """Procesa el mensaje con el sistema modular"""
         logger.info(f"Procesando: {mensaje_usuario}")
         
-        # ✅ PRIMERO: Verificar si es un saludo o despedida
+        # Verificar si es el primer mensaje del usuario
+        historial = self.context_manager.obtener_historial(user_id)
+        es_primer_mensaje = len(historial) == 0
+        
+        if es_primer_mensaje:
+            # Saludo inicial con menú de opciones
+            respuesta = (
+                "¡Hola! Soy el Asistente IA de ARGO Almacenadora, ¿en qué puedo apoyarte?\n\n"
+                "Por favor selecciona una opción:\n"
+                "1. Información sobre infraestructura, servicios y ubicaciones\n"
+                "2. Cotización de servicios\n"
+                #"3. Información de mi operación (soy cliente activo)\n"
+                #"4. Proveedores\n"
+                #"5. Vacantes\n"
+                "3. Otro"
+            )
+            # Guardar en contexto que ya mostramos el menú inicial
+            self.context_manager.guardar_contexto(user_id, "mostrado_menu_inicial", True)
+            # Guardar respuesta en contexto
+            self.context_manager.agregar_mensaje(user_id, "assistant", respuesta)
+            return respuesta
+        
+        # Verificar si estamos esperando ubicación del usuario
+        contexto = self.context_manager.obtener_contexto(user_id)
+        
+        # Asegurarse de que contexto es un diccionario
+        if isinstance(contexto, dict) and contexto.get('esperando_ubicacion') == 'true':
+            # Limpiar el contexto
+            self.context_manager.guardar_contexto(user_id, "esperando_ubicacion", "false")
+            # Procesar la ubicación proporcionada
+            ubicaciones_module = UbicacionesModule(self.db_manager, self.context_manager)
+            respuesta = ubicaciones_module.procesar_ubicacion_usuario(mensaje_usuario, user_id)
+            # Guardar respuesta en contexto y retornar
+            self.context_manager.agregar_mensaje(user_id, "assistant", respuesta)
+            return respuesta
+        
+        # Si contexto no es un diccionario, inicializarlo como tal
+        if not isinstance(contexto, dict):
+            contexto = {}
+            self.context_manager.guardar_contexto(user_id, contexto)
+        
+        # Guardar mensaje en contexto
+        self.context_manager.agregar_mensaje(user_id, "user", mensaje_usuario)
+        
+        # 1. Saludos y despedidas
         if self.es_saludo(mensaje_usuario):
-            return self.procesar_saludo(mensaje_usuario)
-        if self.es_despedida(mensaje_usuario):
-            return self.procesar_despedida(mensaje_usuario)
+            respuesta = self.procesar_saludo(mensaje_usuario)
+        elif self.es_despedida(mensaje_usuario):
+            respuesta = self.procesar_despedida(mensaje_usuario)
+        else:
+            # 2. Procesar selección de menú si es una opción numérica
+            if mensaje_usuario.strip() in ['1', '2', '3', '4', '5', '6']:
+                respuesta = self._procesar_opcion_menu(mensaje_usuario, user_id)
+            else:
+                # 3. Intentar con OpenRouter para clasificación
+                try:
+                    respuesta_deepseek = self.usar_deepseek_openrouter(mensaje_usuario)
+                    
+                    # Verificar si es una respuesta especializada
+                    if respuesta_deepseek and respuesta_deepseek.startswith(("UBICACIONES:", "SERVICIOS:", "HORARIOS:", "RESTRICCIONES:", "COTIZACION:", "ATENCION_CLIENTE:")):
+                        respuesta = self._procesar_respuesta_especializada(respuesta_deepseek, mensaje_usuario, user_id)
+                    else:
+                        # Si no es una respuesta especializada, usar la respuesta de DeepSeek directamente
+                        respuesta = respuesta_deepseek
+                        
+                except Exception as e:
+                    logger.error(f"Error con OpenRouter: {str(e)}")
+                    # 4. Fallback a módulos especializados
+                    respuesta = self._procesar_con_modulos(mensaje_usuario, user_id)
         
-        # ✅ SEGUNDO: Usar DeepSeek para clasificación inteligente
-        respuesta_deepseek = self.usar_deepseek_openrouter(mensaje_usuario)
+        # Guardar respuesta en contexto
+        self.context_manager.agregar_mensaje(user_id, "assistant", respuesta)
         
-        # Si DeepSeek ya procesó la solicitud (ya sea ubicaciones o respuesta normal), retornarla
-        if respuesta_deepseek and not respuesta_deepseek.startswith("UBICACIONES:"):
-            return respuesta_deepseek
+        return respuesta
+
+    def _procesar_opcion_menu(self, opcion, user_id):
+        """Procesa la selección de opciones del menú inicial"""
+        opciones = {
+            '1': self._procesar_opcion_informacion,
+            '2': self._procesar_opcion_cotizacion,
+            '3': self._redirigir_a_comercial,
+            '4': self._redirigir_a_comercial,
+            '5': self._redirigir_a_comercial,
+            '6': self._procesar_opcion_otro
+        }
         
-        # ✅ TERCERO: Intentar con los módulos especializados (para casos donde DeepSeek no detectó pero debería)
+        if opcion in opciones:
+            return opciones[opcion](user_id)
+        else:
+            return "Opción no válida. Por favor selecciona una opción del 1 al 6."
+
+    def _procesar_opcion_informacion(self, user_id):
+        """Procesa la opción 1: Información sobre infraestructura, servicios y ubicaciones"""
+        return (
+            "**INFORMACIÓN SOBRE INFRAESTRUCTURA, SERVICIOS Y UBICACIONES**\n\n"
+            "En ARGO Almacenadora contamos con:\n\n"
+            "🏭 **Infraestructura:**\n"
+            "• Almacenes modernos y seguros\n"
+            "• Sistemas de vigilancia 24/7\n"
+            "• Control de clima y humedad\n"
+            "• Estructuras anti-sísmicas\n\n"
+            "📦 **Servicios:**\n"
+            "• Almacenamiento general y especializado\n"
+            "• Logística y distribución\n"
+            "• Servicios aduanales\n"
+            "• Custodia de mercancías\n\n"
+            "📍 **Ubicaciones:**\n"
+            "• Central Córdoba\n"
+            "• Plaza Golfo\n"
+            "• Plaza Puebla\n"
+            "• Plaza México\n"
+            "• Plaza Bajío\n"
+            "• Plaza Occidente\n"
+            "• Plaza Península\n"
+            "• Plaza Noreste\n\n"
+            "¿Sobre qué aspecto específico te gustaría conocer más?"
+        )
+
+    def _procesar_opcion_cotizacion(self, user_id):
+        """Procesa la opción 2: Cotización de servicios"""
+        # Guardar en contexto que el usuario quiere cotización
+        self.context_manager.guardar_contexto(user_id, "solicitando_cotizacion", True)
+        
+        return (
+            "**COTIZACIÓN DE SERVICIOS**\n\n"
+            "Para proporcionarte una cotización precisa, necesito conocer:\n\n"
+            "1. **Tipo de mercancía:** ¿Qué producto deseas almacenar?\n"
+            "2. **Volumen aproximado:** ¿Cuánto espacio necesitas? (m³ o pallets)\n"
+            "3. **Tiempo de almacenaje:** ¿Por cuánto tiempo?\n"
+            "4. **Ubicación preferida:** ¿En qué plaza te interesa?\n\n"
+            "Por favor, proporciona estos detalles o un ejecutivo se pondrá en contacto contigo."
+        )
+
+    def _redirigir_a_comercial(self, user_id):
+        """Redirige las opciones 3-5 a un ejecutivo comercial"""
+        return (
+            "**CONEXIÓN CON EJECUTIVO**\n\n"
+            "Para atender tu solicitud de manera personalizada, te conectaremos con uno de nuestros ejecutivos especializados.\n\n"
+            "📞 **Contacto directo:**\n"
+            "• Teléfono: 555-123-4567\n"
+            "• Email: ejecutivos@argo.com.mx\n"
+            "• Horario: Lunes a Viernes 9:00 AM - 6:00 PM\n\n"
+            "Un ejecutivo se pondrá en contacto contigo a la brevedad para brindarte la atención personalizada que necesitas."
+        )
+
+    def _procesar_opcion_otro(self, user_id):
+        """Procesa la opción 6: Otro"""
+        return (
+            "**OTRAS CONSULTAS**\n\n"
+            "Para cualquier otra consulta no cubierta en las opciones anteriores, "
+            "por favor describe tu necesidad específica y te ayudaré en lo posible.\n\n"
+            "También puedes contactarnos directamente:\n"
+            "📞 Teléfono: 555-123-4567\n"
+            "📧 Email: contacto@argo.com.mx\n"
+            "🌐 Web: www.argo.com.mx\n\n"
+            "¿En qué más puedo ayudarte?"
+        )
+            
+    def _procesar_respuesta_especializada(self, respuesta_etiquetada, mensaje_original, user_id):
+        """Procesa respuestas etiquetadas de OpenRouter"""
+        # Primero, limpiar la respuesta de cualquier contenido adicional después del pipe
+        if "|" in respuesta_etiquetada:
+            # Tomar solo la parte antes del pipe y el pipe mismo, ignorando lo que viene después
+            respuesta_limpia = respuesta_etiquetada.split("|")[0] + "|"
+        else:
+            respuesta_limpia = respuesta_etiquetada
+        
+        # Ahora procesar con la respuesta limpia
+        if respuesta_limpia.startswith("UBICACIONES:"):
+            partes = respuesta_limpia.split("|")
+            tipo_consulta = partes[0].split(":")[1].strip()
+            ubicacion_extraida = partes[1].strip() if len(partes) > 1 else None
+            
+            ubicaciones_module = UbicacionesModule(self.db_manager, self.context_manager)
+            return ubicaciones_module.procesar_con_tipo(
+                mensaje_original, tipo_consulta, user_id, ubicacion_extraida
+            )
+        
+        elif respuesta_limpia.startswith("SERVICIOS:"):
+            partes = respuesta_limpia.split("|")
+            tipo_servicio = partes[0].split(":")[1].strip()
+            detalle_servicio = partes[1].strip() if len(partes) > 1 else None
+            
+            servicios_module = ServiciosModule(self.db_manager, self.context_manager)
+            return servicios_module.procesar_con_tipo(mensaje_original, tipo_servicio, user_id, detalle_servicio)
+        
+        elif respuesta_limpia.startswith("HORARIOS:"):
+            # Procesamiento para horarios
+            servicios_module = ServiciosModule(self.db_manager, self.context_manager)
+            return servicios_module._procesar_horarios(mensaje_original, user_id)
+        
+        elif respuesta_limpia.startswith("RESTRICCIONES:"):
+            # Procesamiento para restricciones
+            servicios_module = ServiciosModule(self.db_manager, self.context_manager)
+            return servicios_module._procesar_restricciones(mensaje_original, user_id)
+        
+        elif respuesta_limpia.startswith("COTIZACION:"):
+            # Lógica para cotizaciones
+            return self._procesar_cotizacion(respuesta_limpia, user_id)
+        
+        elif respuesta_limpia.startswith("ATENCION_CLIENTE:"):
+            # Lógica para atención a clientes
+            return self._procesar_atencion_cliente(respuesta_limpia, user_id)
+        
+        return "Un ejecutivo se pondrá en contacto para atender su solicitud."
+
+    def _procesar_con_modulos(self, mensaje, user_id):
+        """Procesa el mensaje con los módulos especializados"""
         for modulo in self.modulos:
-            if modulo.puede_manejar(mensaje_usuario):
+            if modulo.puede_manejar(mensaje):
                 logger.info(f"Módulo {modulo.__class__.__name__} maneja el mensaje")
-                return modulo.procesar(mensaje_usuario, user_id)
+                return modulo.procesar(mensaje, user_id)
         
-        # ✅ CUARTO: Verificar si es una pregunta sobre la empresa (sin BD)
-        respuesta_empresa = self.responder_pregunta_empresa(mensaje_usuario)
-        if respuesta_empresa:
-            return respuesta_empresa
-        
-        # Respuesta de emergencia
-        return "Lo siento, no pude procesar tu solicitud. ¿Podrías reformular tu pregunta?"
+        # Último recurso: respuesta genérica
+        return "¿Podría proporcionar más detalles sobre su consulta? Un ejecutivo se pondrá en contacto si es necesario."

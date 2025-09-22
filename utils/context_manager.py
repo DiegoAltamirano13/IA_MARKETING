@@ -1,64 +1,73 @@
-from datetime import datetime, timedelta
+import json
+import time
 import logging
-
-logger = logging.getLogger(__name__)
+from datetime import datetime, timedelta
 
 class ContextManager:
     def __init__(self):
-        self.contexto_ubicaciones = {}
-        self.contexto_tiempo = {}
-        self.tiempo_expiracion = timedelta(minutes=10)
-    
-    def guardar_ubicaciones(self, user_id, ubicaciones):
-        self.contexto_ubicaciones[user_id] = ubicaciones
-        self.contexto_tiempo[user_id] = datetime.now()
-        logger.info(f"Contexto guardado para usuario {user_id}: {len(ubicaciones)} ubicaciones")
-    
-    def obtener_ubicaciones(self, user_id):
-        self._limpiar_contexto_antiguo(user_id)
-        ubicaciones = self.contexto_ubicaciones.get(user_id, [])  # ⬅️ PRIMERO obtén las ubicaciones
-        logger.info(f"Ubicaciones recuperadas para {user_id}: {ubicaciones}")  # ⬅️ LUEGO las usas
-        return ubicaciones
-    
-    def obtener_ubicacion_por_referencia(self, user_id, referencia):
-        ubicaciones = self.obtener_ubicaciones(user_id)
-        logger.info(f"Buscando referencia '{referencia}' para user {user_id}")
-
-        if not ubicaciones:
-            return None
+        self.conversaciones = {}  # user_id -> {contexto, historial, timestamp}
         
-        # Mapeo de referencias a números
-        numeros = {
-            'primera': 1, 'primero': 1, '1ra': 1, '1ro': 1, '1': 1,
-            'segunda': 2, 'segundo': 2, '2da': 2, '2do': 2, '2': 2,
-            'tercera': 3, 'tercero': 3, '3ra': 3, '3ro': 3, '3': 3,
-            'cuarta': 4, 'cuarto': 4, '4ta': 4, '4to': 4, '4': 4,
-            'quinta': 5, 'quinto': 5, '5ta': 5, '5to': 5, '5': 5,
-            'última': -1, 'ultima': -1, 'último': -1, 'ultimo': -1
+    def obtener_contexto(self, user_id):
+        """Obtiene el contexto de un usuario"""
+        if user_id not in self.conversaciones:
+            return {}
+        return self.conversaciones[user_id].get('contexto', {})
+    
+    def obtener_historial(self, user_id):
+        """Obtiene el historial de mensajes del usuario"""
+        if user_id not in self.conversaciones:
+            return []
+        return self.conversaciones[user_id].get('historial', [])
+    
+    def agregar_mensaje(self, user_id, rol, mensaje):
+        """Agrega un mensaje al historial de conversación"""
+        if user_id not in self.conversaciones:
+            self.conversaciones[user_id] = {
+                'historial': [],
+                'contexto': {},
+                'timestamp': time.time()
+            }
+        
+        self.conversaciones[user_id]['historial'].append({
+            'rol': rol,
+            'mensaje': mensaje,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Limpiar conversaciones antiguas (más de 24 horas)
+        self._limpiar_conversaciones_antiguas()
+    
+    def guardar_contexto(self, user_id, clave, valor):
+        """Guarda información contextual específica"""
+        if user_id not in self.conversaciones:
+            self.conversaciones[user_id] = {
+                'historial': [],
+                'contexto': {},
+                'timestamp': time.time()
+            }
+        
+        self.conversaciones[user_id]['contexto'][clave] = {
+            'valor': valor,
+            'timestamp': datetime.now().isoformat()
         }
-        
-        if referencia.lower() in numeros:
-            indice = numeros[referencia.lower()]
-            if indice == -1:  # Última
-                return ubicaciones[-1] if ubicaciones else None
-            elif 1 <= indice <= len(ubicaciones):
-                return ubicaciones[indice - 1]
-        
-        # Búsqueda por nombre aproximado
-        referencia_limpia = referencia.lower().strip()
-        for ubicacion in ubicaciones:
-            if referencia_limpia in ubicacion.lower():
-                return ubicacion
-        
-        return None
     
-    def _limpiar_contexto_antiguo(self, user_id):
-        ahora = datetime.now()
-        if user_id in self.contexto_tiempo:
-            tiempo_transcurrido = ahora - self.contexto_tiempo[user_id]
-            if tiempo_transcurrido > self.tiempo_expiracion:
-                if user_id in self.contexto_ubicaciones:
-                    del self.contexto_ubicaciones[user_id]
-                if user_id in self.contexto_tiempo:
-                    del self.contexto_tiempo[user_id]
-                logger.info(f"Contexto limpiado para usuario {user_id}")
+    def _limpiar_conversaciones_antiguas(self):
+        """Elimina conversaciones con más de 24 horas de antigüedad"""
+        ahora = time.time()
+        user_ids_a_eliminar = []
+        
+        for user_id, datos in self.conversaciones.items():
+            if ahora - datos['timestamp'] > 86400:  # 24 horas
+                user_ids_a_eliminar.append(user_id)
+        
+        for user_id in user_ids_a_eliminar:
+            del self.conversaciones[user_id]
+    
+    def obtener_historial_completo(self, user_id):
+        """Obtiene el historial completo de mensajes"""
+        return self.obtener_historial(user_id)
+    
+    def limpiar_contexto_usuario(self, user_id):
+        """Limpia el contexto de un usuario específico"""
+        if user_id in self.conversaciones:
+            del self.conversaciones[user_id]

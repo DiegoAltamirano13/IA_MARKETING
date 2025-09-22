@@ -1,7 +1,38 @@
+# Framework web
 flask==2.3.3
+
+# Peticiones HTTP
 requests==2.31.0
-transformers==4.35.0
-torch==2.8.0
-sentencepiece==0.1.99
-accelerate==0.24.0
-protobuf==3.20.0
+
+# Variables de entorno
+python-dotenv==1.0.0
+
+# Corrección ortográfica
+autocorrect==2.6.1
+
+# API de OpenAI/OpenRouter
+openai==0.28.0
+
+# Procesamiento de datos
+numpy==1.24.3
+pandas==2.0.3
+
+# Procesamiento de lenguaje natural
+nltk==3.8.1
+spacy==3.6.1
+textblob==0.17.1
+
+# Modelos de IA
+transformers==4.31.0
+torch==2.0.1
+
+# Base de datos Oracle
+oracledb==1.4.1
+
+# Alternativas de corrección ortográfica
+pyspellchecker==0.7.2
+
+# Otras utilidades
+python-dateutil==2.8.2
+chardet==5.2.0
+urllib3==2.0.4

@@ -1,483 +1,215 @@
-import re
 import logging
-import unicodedata
-from .base_module import BaseModule
-from utils.formatters import formatear_lista
+import re
+from data.ubicaciones_data import UBICACIONES, CIUDADES_UBICACIONES, PLAZAS
 
 logger = logging.getLogger(__name__)
 
-def normalizar_texto(texto):
-    """Normaliza texto quitando acentos y convirtiendo a minúsculas"""
-    if not texto:
-        return ""
-    
-    # Normaliza a forma NFKD y quita los caracteres diacríticos (acentos)
-    texto_normalizado = unicodedata.normalize('NFKD', texto)
-    texto_sin_acentos = ''.join([c for c in texto_normalizado if not unicodedata.combining(c)])
-    
-    return texto_sin_acentos.lower()
+class UbicacionesModule:
+    def __init__(self, db_manager, context_manager):
+        self.context_manager = context_manager
+        self.ubicaciones = UBICACIONES
+        self.ciudades_ubicaciones = CIUDADES_UBICACIONES
+        self.plazas = PLAZAS
 
-class UbicacionesModule(BaseModule):
     def puede_manejar(self, mensaje):
+        """Determina si el mensaje es sobre ubicaciones"""
         mensaje_lower = mensaje.lower()
-         # Lista MUY completa de palabras clave y variantes
-        palabras_clave_ubicaciones = [
-            # Palabras básicas
-            'ubicación', 'ubicacion', 'ubicaciones', 'dirección', 'direccion', 
-            'direcciones', 'localización', 'localizacion', 'localizaciones',
-            'lugar', 'lugares', 'sitio', 'sitios', 'sede', 'sedes',
-            'plaza', 'plazas', 'almacén', 'almacen', 'almacenes', 'bodega', 'bodegas',
-            'depósito', 'deposito', 'depósitos', 'depositos', 'centro', 'centros',
-            'sucursal', 'sucursales', 'instalación', 'instalacion', 'instalaciones',
-            
-            # Verbos de búsqueda
-            'encontrar', 'encontrará', 'buscar', 'encontré', 'hallar', 'localizar',
-            'ver', 'mostrar', 'listar', 'conocer', 'saber', 'consultar',
-            
-            # Preguntas de ubicación
-            'dónde', 'donde', 'dónde está', 'donde esta', 'dónde están', 'donde estan',
-            'dónde queda', 'donde queda', 'dónde quedan', 'donde quedan',
-            'dónde se encuentra', 'donde se encuentra', 'dónde se encuentran', 'donde se encuentran',
-            'dónde hay', 'donde hay', 'dónde puedo encontrar', 'donde puedo encontrar',
-            'en qué lugar', 'en que lugar', 'en qué lugares', 'en que lugares',
-            'cuál es la dirección', 'cual es la direccion', 'cuáles son las direcciones',
-            'cuales son las direcciones', 'cómo llegar', 'como llegar',
-            'qué dirección', 'que direccion', 'qué direcciones', 'que direcciones',
-            
-            # Preposiciones y artículos comunes
-            'la ubicación', 'las ubicaciones', 'el almacén', 'los almacenes',
-            'mi ubicación', 'nuestra ubicación', 'sus ubicaciones',
-            
-            # Términos geográficos
-            'ciudad', 'ciudades', 'estado', 'estados', 'municipio', 'municipios',
-            'zona', 'zonas', 'región', 'region', 'regiones', 'área', 'area', 'áreas',
-            'locación', 'locacion', 'locaciones',
-            
-            # Términos de negocio/logística
-            'punto', 'puntos', 'punto de entrega', 'puntos de entrega',
-            'centro de distribución', 'centros de distribución',
-            'logística', 'logistica', 'distribución', 'distribucion',
-            'entrega', 'entregas', 'recepción', 'recepcion'
+        palabras_clave = [
+            'ubicacion', 'ubicación', 'ubicaciones', 'donde', 'dónde',
+            'sucursal', 'sucursales', 'almacén', 'almacen', 'bodega',
+            'direccion', 'dirección', 'maps', 'mapa', 'google maps',
+            'córdoba', 'veracruz', 'puebla', 'méxico', 'cdmx',
+            'querétaro', 'guadalajara', 'mérida', 'monterrey',
+            'plaza', 'centro', 'corporativo'
         ]
-        
-         # Referencias a posiciones (primera, segunda, etc.)
-        referencias_posiciones = [
-            'primera', 'segunda', 'tercera', 'cuarta', 'quinta', 'última',
-            'primero', 'segundo', 'tercero', 'cuarto', 'quinto',
-            '1ra', '2da', '3ra', '4ta', '5ta', 'número', 'num', 'nro'
-        ]
+        return any(palabra in mensaje_lower for palabra in palabras_clave)
 
-        # Verificar palabras clave de ubicaciones
-        tiene_palabra_ubicacion = any(palabra in mensaje_lower for palabra in palabras_clave_ubicaciones)
+    def procesar(self, mensaje, user_id):
+        """Procesa mensajes sobre ubicaciones"""
+        mensaje_lower = mensaje.lower()
         
-        # Verificar si es una referencia a posición (ej: "la primera")
-        tiene_referencia_posicion = any(ref in mensaje_lower for ref in referencias_posiciones)
+        # Guardar contexto
+        self.context_manager.guardar_contexto(user_id, "tema_consulta", "ubicaciones")
         
-        # También detectar patrones como "de la primera", "la número 1", etc.
-        patrones_referencia = [
-            r'(?:la|el)\s+(primera|segunda|tercera|cuarta|quinta|última)',
-            r'(?:número|num|nro)\s*\d+',
-            r'la\s+\d+'
-        ]
+        # Detectar tipo de consulta
+        if any(palabra in mensaje_lower for palabra in ['todos', 'todas', 'listado', 'lista', 'cuales', 'cuáles']):
+            return self._procesar_consulta_general()
         
-        tiene_patron_referencia = any(re.search(patron, mensaje_lower) for patron in patrones_referencia)
+        elif any(palabra in mensaje_lower for palabra in ['cerca', 'cercano', 'cercana', 'próximo', 'proximo']):
+            return self._procesar_ubicacion_cercana(mensaje, user_id)
         
-        return tiene_palabra_ubicacion or tiene_referencia_posicion or tiene_patron_referencia
-    
-    def procesar_con_tipo(self, mensaje, tipo_consulta, user_id="default", ubicacion_extraida=None):
-        """
-        Procesa el mensaje sabiendo previamente el tipo de consulta y ubicación
-        """
-        logger.info(f"Procesando consulta: tipo={tipo_consulta}, ubicación_extraida={ubicacion_extraida}")
-        
-        if tipo_consulta == "ESPECIFICA":
-            # Usar la ubicación extraída por DeepSeek si está disponible
-            if ubicacion_extraida and ubicacion_extraida != "":
-                logger.info(f"Usando ubicación extraída por DeepSeek: {ubicacion_extraida}")
-                return self._obtener_detalles_ubicacion_especifica(ubicacion_extraida)
-            
-            # Si no hay ubicación extraída, buscar en el mensaje
-            ubicacion_especifica = self._buscar_ubicacion_en_mensaje(mensaje)
-            if ubicacion_especifica:
-                logger.info(f"Ubicación encontrada en mensaje: {ubicacion_especifica}")
-                return self._obtener_detalles_ubicacion_especifica(ubicacion_especifica)
-            else:
-                # Si no encuentra la ubicación, preguntar al usuario
-                return "¿En qué ciudad o plaza específica te interesa conocer nuestras instalaciones?"
-        
-        elif tipo_consulta == "DETALLES":
-            # Usar la ubicación extraída por DeepSeek si está disponible
-            if ubicacion_extraida and ubicacion_extraida != "":
-                return self._obtener_detalles_ubicacion_especifica(ubicacion_extraida)
-            
-            # Buscar ubicación para detalles específicos
-            ubicacion_especifica = self._buscar_ubicacion_en_mensaje(mensaje)
-            if ubicacion_especifica:
-                return self._obtener_detalles_ubicacion_especifica(ubicacion_especifica)
-            else:
-                # Mostrar todas las ubicaciones con detalles
-                return self._obtener_ubicaciones_detalladas()
-        
-        elif tipo_consulta == "REFERENCIA":
-            # Manejar referencias numéricas como "1", "2", "primera", "segunda"
-            if ubicacion_extraida and ubicacion_extraida != "":
-                logger.info(f"Procesando referencia: {ubicacion_extraida}")
-                return self._procesar_referencia_ubicacion(user_id, ubicacion_extraida)
-            else:
-                # Si no hay referencia específica, mostrar todas las ubicaciones
-                return self._obtener_ubicaciones_generales(user_id)
-        
-        elif tipo_consulta == "GENERAL":
-            # Mostrar todas las ubicaciones generales
-            return self._obtener_ubicaciones_generales(user_id)
+        elif any(palabra in mensaje_lower for palabra in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', 
+                                                         'primera', 'segunda', 'tercera', 'cuarta', 'quinta']):
+            return self._procesar_por_referencia(mensaje)
         
         else:
-            # Por defecto, usar el procesamiento normal
+            # Buscar por ciudad o ubicación específica
+            return self._procesar_ubicacion_especifica(mensaje)
+
+    def procesar_con_tipo(self, mensaje, tipo_consulta, user_id="default", ubicacion_extraida=None):
+        """Procesa con tipo de consulta específico"""
+        if tipo_consulta == "GENERAL":
+            return self._procesar_consulta_general()
+        elif tipo_consulta == "ESPECIFICA" and ubicacion_extraida:
+            return self._buscar_ubicacion_por_nombre(ubicacion_extraida)
+        elif tipo_consulta == "DETALLES" and ubicacion_extraida:
+            return self._mostrar_detalles_completos(ubicacion_extraida)
+        elif tipo_consulta == "REFERENCIA" and ubicacion_extraida:
+            return self._procesar_por_referencia(ubicacion_extraida)
+        else:
             return self.procesar(mensaje, user_id)
+
+    def _procesar_consulta_general(self):
+        """Muestra todas las ubicaciones disponibles"""
+        respuesta = "📍 *UBICACIONES ARGO ALMACENADORA*\n\n"
+        respuesta += "Tenemos presencia en las siguientes plazas:\n\n"
         
-    def procesar(self, mensaje, user_id="default"):
+        for plaza in self.plazas:
+            respuesta += f"🏢 *{plaza}*\n"
+            ubicaciones_plaza = [u for u in self.ubicaciones.values() if u['plaza'] == plaza]
+            for ubicacion in ubicaciones_plaza:
+                respuesta += f"• {ubicacion['nombre']}\n"
+            respuesta += "\n"
+        
+        respuesta += "¿Te interesa alguna ubicación en específico? Puedo darte todos los detalles."
+        return respuesta
+
+    def _procesar_ubicacion_cercana(self, mensaje, user_id):
+        """Pregunta por la ubicación del usuario para recomendar la más cercana"""
+        # Guardar contexto para seguimiento
+        self.context_manager.guardar_contexto(user_id, "esperando_ubicacion", "true")
+        
+        return "Para recomendarte la ubicación más cercana, ¿podrías decirme en qué ciudad o estado te encuentras?"
+
+    def _procesar_por_referencia(self, mensaje):
+        """Procesa consultas por número de referencia"""
         mensaje_lower = mensaje.lower()
         
-        # PRIMERO: Verificar si es una solicitud de DETALLES específicos
-        if self._es_solicitud_detalles(mensaje):
-            logger.info("Detectada solicitud de detalles específicos")
-            return self._obtener_ubicaciones_detalladas()
-        
-        # SEGUNDO: Verificar si menciona una ubicación específica
-        ubicacion_especifica = self._buscar_ubicacion_en_mensaje(mensaje)
-        if ubicacion_especifica:
-            logger.info(f"Detectada ubicación específica: {ubicacion_especifica}")
-            return self._obtener_detalles_ubicacion_especifica(ubicacion_especifica)
-        
-        # TERCERO: Verificar si es una referencia a ubicación previa
-        referencia = self._detectar_referencia_numerica(mensaje)
-        if referencia:
-            logger.info(f"Detectada referencia numérica: {referencia}")
-            return self._procesar_referencia_ubicacion(user_id, referencia)
-        
-        # CUARTO: Por defecto, mostrar TODAS las ubicaciones (consulta general)
-        logger.info("Mostrando todas las ubicaciones (consulta general)")
-        return self._obtener_ubicaciones_generales(user_id)
-    
-    def _detectar_pregunta_con_ubicacion(self, mensaje):
-        """Detecta específicamente patrones como 'en [ubicación]'"""
-        patrones = [
-            r'en\s+([a-zA-ZáéíóúñÑ\s]+)\??$',
-            r'ubicaciones\s+en\s+([a-zA-ZáéíóúñÑ\s]+)\??$',
-            r'almacenes\s+en\s+([a-zA-ZáéíóúñÑ\s]+)\??$',
-            r'plazas\s+en\s+([a-zA-ZáéíóúñÑ\s]+)\??$',
-            r'tienes\s+.*en\s+([a-zA-ZáéíóúñÑ\s]+)\??$',
-            r'hay\s+.*en\s+([a-zA-ZáéíóúñÑ\s]+)\??$'
-        ]
-        
-        for patron in patrones:
-            coincidencias = re.findall(patron, mensaje, re.IGNORECASE)
-            if coincidencias:
-                ubicacion = coincidencias[0].strip()
-                # Validar que no sea una palabra muy corta o común
-                if len(ubicacion) > 3 and ubicacion.lower() not in ['que', 'donde', 'como', 'cuando']:
-                    return ubicacion
-        return None
-
-    def _detectar_referencia_numerica(self, mensaje):
-        """Solo detecta referencias numéricas, no nombres de lugares"""
-        patrones = [
-            r'(?:la|el)\s+(primera|segunda|tercera|cuarta|quinta|última|1ra|2da|3ra|4ta|5ta)',
-            r'(?:número|num|nro|#)\s*(\d+)',
-            r'la\s+(\d+)(?:ª|ra|da|ta)?'
-        ]
-        
-        for patron in patrones:
-            coincidencias = re.findall(patron, mensaje, re.IGNORECASE)
-            if coincidencias:
-                return coincidencias[0].strip()
-        return None
-    
-    def _detectar_referencia_ubicacion(self, mensaje):
-        patrones = [
-            r'(?:la|el|las|los)\s+(primera|segunda|tercera|cuarta|quinta|última|1ra|2da|3ra|4ta|5ta)',
-            r'(?:número|num|nro|#)\s*(\d+)',
-            r'en\s+([a-zA-ZáéíóúñÑ\s]+)',
-            r'de\s+([a-zA-ZáéíóúñÑ\s]+)',
-            r'(\b(?:primera|segunda|tercera|cuarta|quinta|última)\b)'
-        ]
-        
-        for patron in patrones:
-            coincidencias = re.findall(patron, mensaje, re.IGNORECASE)
-            if coincidencias:
-                return coincidencias[0].strip()
-        return None
-    
-    def _procesar_referencia_ubicacion(self, user_id, referencia):
-        logger.info(f"Procesando referencia: '{referencia}' para user: {user_id}")
-        
-        # Convertir referencias textuales a numéricas
-        mapeo_referencias = {
-            'primera': '1', 'primero': '1', '1ra': '1',
-            'segunda': '2', 'segundo': '2', '2da': '2', 
-            'tercera': '3', 'tercero': '3', '3ra': '3',
-            'cuarta': '4', 'cuarto': '4', '4ta': '4',
-            'quinta': '5', 'quinto': '5', '5ta': '5',
-            'última': 'ultima', 'ultima': 'ultima'
+        # Mapeo de números a ubicaciones
+        ubicaciones_lista = list(self.ubicaciones.keys())
+        mapeo_numeros = {
+            '1': 0, 'primera': 0, 'primero': 0,
+            '2': 1, 'segunda': 1, 'segundo': 1,
+            '3': 2, 'tercera': 2, 'tercero': 2,
+            '4': 3, 'cuarta': 3, 'cuarto': 3,
+            '5': 4, 'quinta': 4, 'quinto': 4,
+            '6': 5, 'sexta': 5, 'sexto': 5,
+            '7': 6, 'séptima': 6, 'septima': 6, 'séptimo': 6, 'septimo': 6,
+            '8': 7, 'octava': 7, 'octavo': 7,
+            '9': 8, 'novena': 8, 'noveno': 8,
+            '10': 9, 'décima': 9, 'decima': 9, 'décimo': 9, 'decimo': 9
         }
         
-        # Normalizar la referencia
-        referencia_normalizada = referencia.lower().strip()
-        if referencia_normalizada in mapeo_referencias:
-            referencia_normalizada = mapeo_referencias[referencia_normalizada]
+        for palabra, indice in mapeo_numeros.items():
+            if palabra in mensaje_lower:
+                if indice < len(ubicaciones_lista):
+                    ubicacion_key = ubicaciones_lista[indice]
+                    return self._mostrar_detalles_completos(ubicacion_key)
+                else:
+                    return f"Solo tenemos {len(ubicaciones_lista)} ubicaciones disponibles."
         
-        # OBTENER las ubicaciones del contexto
-        ubicaciones = self.context_manager.obtener_ubicaciones(user_id)
-        logger.info(f"Ubicaciones en contexto: {ubicaciones}")
-        
-        if not ubicaciones:
-            logger.warning("No hay ubicaciones en contexto")
-            return "No tengo ubicaciones en contexto. ¿Podrías pedirme que muestre las ubicaciones primero?"
-        
-        # Buscar por número de referencia
-        if referencia_normalizada.isdigit():
-            indice = int(referencia_normalizada) - 1
-            if 0 <= indice < len(ubicaciones):
-                ubicacion = ubicaciones[indice]
-                logger.info(f"Ubicación encontrada para referencia '{referencia}': {ubicacion}")
-                return self._obtener_detalles_ubicacion_especifica(ubicacion)
-        
-        # Buscar por texto "última"
-        elif referencia_normalizada == 'ultima' and ubicaciones:
-            ubicacion = ubicaciones[-1]
-            logger.info(f"Última ubicación encontrada: {ubicacion}")
-            return self._obtener_detalles_ubicacion_especifica(ubicacion)
-        
-        # Si no encuentra, mostrar sugerencias
-        primeras_tres = ubicaciones[:3]
-        sugerencias = ", ".join(primeras_tres)
-        return f"No encontré la ubicación '{referencia}'. Las ubicaciones disponibles incluyen: {sugerencias}... ¿Te refieres a alguna de estas?"
-        
-    def _es_solicitud_detalles(self, mensaje):
-        mensaje_lower = mensaje.lower()
-        palabras_detalles = [
-            'detalles', 'específico', 'especifico', 'dirección', 'direccion', 
-            'teléfono', 'telefono', 'horario', 'contacto', 'información', 'informacion'
-        ]
-        return any(palabra in mensaje_lower for palabra in palabras_detalles)
-    
-    def _buscar_ubicacion_en_mensaje(self, mensaje):
-        """Busca nombres de ubicaciones en el mensaje normalizando texto"""
-        try:
-            # Obtener todas las ubicaciones posibles de la BD
-            query = """
-            SELECT DISTINCT 
-                CASE 
-                    WHEN INSTR(B.V_RAZON_SOCIAL, '(') > 0 AND INSTR(B.V_RAZON_SOCIAL, ')') > 0
-                        THEN SUBSTR(B.V_RAZON_SOCIAL, 1, INSTR(B.V_RAZON_SOCIAL, '(') - 1) || 
-                        SUBSTR(B.V_RAZON_SOCIAL, INSTR(B.V_RAZON_SOCIAL, ')') + 1)
-                    ELSE B.V_RAZON_SOCIAL 
-                END AS V_RAZON_SOCIAL,
-                A.V_DIRECCION
-            FROM almacen a 
-            INNER JOIN PLAZA B ON A.IID_PLAZA = B.IID_PLAZA
-            WHERE A.S_STATUS = 1 AND A.IID_PLAZA <> 2
-            """
-            
-            columnas, resultados = self.db_manager.ejecutar_consulta_segura(query)
-            
-            if not resultados:
-                return None
-            
-            # Normalizar el mensaje para búsqueda sin acentos
-            mensaje_normalizado = normalizar_texto(mensaje)
-            
-            # Buscar en nombres de plazas (normalizados)
-            for fila in resultados:
-                plaza = fila[0]
-                if plaza:
-                    plaza_normalizada = normalizar_texto(plaza)
-                    if plaza_normalizada in mensaje_normalizado:
-                        return plaza
-            
-            # Buscar en direcciones (normalizadas)
-            for fila in resultados:
-                direccion = fila[1]
-                if direccion:
-                    direccion_normalizada = normalizar_texto(direccion)
-                    if direccion_normalizada in mensaje_normalizado:
-                        return fila[0]  # Devolver la plaza correspondiente
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error buscando ubicación en mensaje: {str(e)}")
-            return None
-    
-    def _obtener_ubicaciones_generales(self, user_id):
-        query = """
-        SELECT DISTINCT 
-            CASE 
-                WHEN INSTR(B.V_RAZON_SOCIAL, '(') > 0 AND INSTR(B.V_RAZON_SOCIAL, ')') > 0
-                    THEN SUBSTR(B.V_RAZON_SOCIAL, 1, INSTR(B.V_RAZON_SOCIAL, '(') - 1) || 
-                    SUBSTR(B.V_RAZON_SOCIAL, INSTR(B.V_RAZON_SOCIAL, ')') + 1)
-                ELSE B.V_RAZON_SOCIAL 
-            END AS V_RAZON_SOCIAL
-        FROM almacen a 
-        INNER JOIN PLAZA B ON A.IID_PLAZA = B.IID_PLAZA
-        WHERE A.S_STATUS = 1 AND A.IID_PLAZA <> 2
-        ORDER BY V_RAZON_SOCIAL
-        """
-        
-        columnas, resultados = self.db_manager.ejecutar_consulta_segura(query)
-        
-        if not resultados:
-            return "No se encontraron ubicaciones en la base de datos."
-        
-        ubicaciones = [fila[0] for fila in resultados]
-        self.context_manager.guardar_ubicaciones(user_id, ubicaciones)
-        
-        ubicaciones_formateadas = formatear_lista(ubicaciones, "location")
-        
-        respuesta = "📍 **Tenemos almacenes en las siguientes plazas:**\n\n"
-        respuesta += f"{ubicaciones_formateadas}\n\n"
-        respuesta += "¿Te gustaría conocer las direcciones específicas de alguna plaza en particular?"
-        
-        return respuesta
-    
-    def _obtener_ubicaciones_detalladas(self):
-        query = """
-        SELECT DISTINCT 
-            CASE 
-                WHEN INSTR(B.V_RAZON_SOCIAL, '(') > 0 AND INSTR(B.V_RAZON_SOCIAL, ')') > 0
-                    THEN SUBSTR(B.V_RAZON_SOCIAL, 1, INSTR(B.V_RAZON_SOCIAL, '(') - 1) || 
-                    SUBSTR(B.V_RAZON_SOCIAL, INSTR(B.V_RAZON_SOCIAL, ')') + 1)
-                ELSE B.V_RAZON_SOCIAL 
-            END AS V_RAZON_SOCIAL,
-            A.V_DIRECCION,
-            '+52 271-111-2222' as V_TELEFONO,
-            '9am - 7pm ' as V_HORARIO
-        FROM almacen a 
-        INNER JOIN PLAZA B ON A.IID_PLAZA = B.IID_PLAZA
-        WHERE A.S_STATUS = 1 AND A.IID_PLAZA <> 2
-        ORDER BY V_RAZON_SOCIAL, V_DIRECCION
-        """
-        
-        columnas, resultados = self.db_manager.ejecutar_consulta_segura(query)
-        
-        if not resultados:
-            return "No se encontraron ubicaciones específicas en la base de datos."
-        
-        # Agrupar por estado/plaza
-        ubicaciones_por_plaza = {}
-        for fila in resultados:
-            plaza = fila[0]
-            direccion = fila[1]
-            telefono = fila[2] or "No disponible"
-            horario = fila[3] or "No disponible"
-            
-            if plaza not in ubicaciones_por_plaza:
-                ubicaciones_por_plaza[plaza] = []
-            
-            ubicaciones_por_plaza[plaza].append({
-                'direccion': direccion,
-                'telefono': telefono,
-                'horario': horario
-            })
-        
-        respuesta = "📍 **Ubicaciones específicas de nuestras instalaciones:**\n\n"
-        
-        for plaza, ubicaciones in ubicaciones_por_plaza.items():
-            respuesta += f"🏢 **{plaza}:**\n"
-            for i, ubicacion in enumerate(ubicaciones, 1):
-                respuesta += f"   {i}. {ubicacion['direccion']}\n"
-                if ubicacion['telefono'] != "No disponible":
-                    respuesta += f"     📞 Teléfono: {ubicacion['telefono']}\n"
-                if ubicacion['horario'] != "No disponible":
-                    respuesta += f"     ⏰ Horario: {ubicacion['horario']}\n"
-                respuesta += "\n"
-        
-        return respuesta
-    
-    def _obtener_detalles_ubicacion_especifica(self, ubicacion):
-        try:
-            # Normalizar la ubicación para búsqueda sin acentos
-            ubicacion_normalizada = normalizar_texto(ubicacion)
-            
-            query = """
-            SELECT 
-                CASE 
-                    WHEN INSTR(B.V_RAZON_SOCIAL, '(') > 0 AND INSTR(B.V_RAZON_SOCIAL, ')') > 0
-                        THEN SUBSTR(B.V_RAZON_SOCIAL, 1, INSTR(B.V_RAZON_SOCIAL, '(') - 1) || 
-                        SUBSTR(B.V_RAZON_SOCIAL, INSTR(B.V_RAZON_SOCIAL, ')') + 1)
-                    ELSE B.V_RAZON_SOCIAL 
-                END AS V_RAZON_SOCIAL,
-                A.V_DIRECCION,
-                '+52 271-111-2222' as V_TELEFONO,
-                '9am - 7pm ' as V_HORARIO
-            FROM almacen a 
-            INNER JOIN PLAZA B ON A.IID_PLAZA = B.IID_PLAZA
-            WHERE A.S_STATUS = 1 
-            AND (LOWER(B.V_RAZON_SOCIAL) LIKE '%' || LOWER(:1) || '%' 
-                OR LOWER(A.V_DIRECCION) LIKE '%' || LOWER(:2) || '%')
-            ORDER BY V_RAZON_SOCIAL, V_DIRECCION
-            """
-            
-            # Buscar primero con texto original, luego con normalizado
-            columnas, resultados = self.db_manager.ejecutar_consulta_segura(
-                query, [ubicacion, ubicacion]
-            )
-            
-            # Si no hay resultados, buscar con texto normalizado
-            if not resultados:
-                columnas, resultados = self.db_manager.ejecutar_consulta_segura(
-                    query, [ubicacion_normalizada, ubicacion_normalizada]
-                )
+        return "No entendí la referencia. ¿Podrías ser más específico?"
 
-            if not resultados:
-                return f"❌ No se encontraron almacenes en la ubicación '{ubicacion}'. ¿Te gustaría ver todas nuestras ubicaciones disponibles?"
-            
-            respuesta = f"📍 **Almacenes en {ubicacion.upper()}:**\n\n"
-            
-            for fila in resultados:
-                plaza = fila[0]
-                direccion = fila[1]
-                telefono = fila[2] or "No disponible"
-                horario = fila[3] or "No disponible"
-                
-                respuesta += f"🏢 **{plaza}**\n"
-                respuesta += f"   📍 {direccion}\n"
-                if telefono != "No disponible":
-                    respuesta += f"   📞 {telefono}\n"
-                if horario != "No disponible":
-                    respuesta += f"   ⏰ {horario}\n"
-                respuesta += "\n"
-            
-            return respuesta
-            
-        except Exception as e:
-            logger.error(f"Error obteniendo detalles de ubicación '{ubicacion}': {str(e)}")
-            return f"❌ Error al obtener información de la ubicación '{ubicacion}'."
+    def _procesar_ubicacion_especifica(self, mensaje):
+        """Busca ubicación por nombre o ciudad"""
+        mensaje_lower = mensaje.lower()
         
-    def obtener_todas_las_ubicaciones(self):
-        """Método público para obtener todas las ubicaciones sin formato de respuesta"""
-        try:
-            query = """
-            SELECT DISTINCT 
-                CASE 
-                    WHEN INSTR(B.V_RAZON_SOCIAL, '(') > 0 AND INSTR(B.V_RAZON_SOCIAL, ')') > 0
-                        THEN SUBSTR(B.V_RAZON_SOCIAL, 1, INSTR(B.V_RAZON_SOCIAL, '(') - 1) || 
-                        SUBSTR(B.V_RAZON_SOCIAL, INSTR(B.V_RAZON_SOCIAL, ')') + 1)
-                    ELSE B.V_RAZON_SOCIAL 
-                END AS V_RAZON_SOCIAL
-            FROM almacen a 
-            INNER JOIN PLAZA B ON A.IID_PLAZA = B.IID_PLAZA
-            WHERE A.S_STATUS = 1 AND A.IID_PLAZA <> 2
-            ORDER BY V_RAZON_SOCIAL
-            """
-            
-            columnas, resultados = self.db_manager.ejecutar_consulta_segura(query)
-            
-            if resultados:
-                return [fila[0] for fila in resultados]
+        # Buscar por nombre de ubicación
+        for ubicacion_key, datos in self.ubicaciones.items():
+            if ubicacion_key.lower() in mensaje_lower or datos['nombre'].lower() in mensaje_lower:
+                return self._mostrar_detalles_completos(ubicacion_key)
+        
+        # Buscar por ciudad
+        for ciudad, ubicaciones in self.ciudades_ubicaciones.items():
+            if ciudad in mensaje_lower:
+                if len(ubicaciones) == 1:
+                    return self._mostrar_detalles_completos(ubicaciones[0])
+                else:
+                    return self._mostrar_ubicaciones_ciudad(ciudad, ubicaciones)
+        
+        # Si no encuentra, ofrecer ayuda
+        return self._ofrecer_ayuda_ubicaciones()
+
+    def _buscar_ubicacion_por_nombre(self, nombre_ubicacion):
+        """Busca ubicación por nombre aproximado"""
+        nombre_lower = nombre_ubicacion.lower()
+        
+        # Búsqueda exacta
+        for ubicacion_key in self.ubicaciones.keys():
+            if ubicacion_key.lower() == nombre_lower:
+                return self._mostrar_detalles_completos(ubicacion_key)
+        
+        # Búsqueda parcial
+        for ubicacion_key, datos in self.ubicaciones.items():
+            if (nombre_lower in ubicacion_key.lower() or 
+                nombre_lower in datos['nombre'].lower() or
+                nombre_lower in datos['ciudad'].lower()):
+                return self._mostrar_detalles_completos(ubicacion_key)
+        
+        return f"No encontré la ubicación '{nombre_ubicacion}'. ¿Podrías intentar con otro nombre?"
+
+    def _mostrar_detalles_completos(self, ubicacion_key):
+        """Muestra todos los detalles de una ubicación"""
+        if ubicacion_key not in self.ubicaciones:
+            return "Ubicación no encontrada."
+        
+        ubicacion = self.ubicaciones[ubicacion_key]
+        
+        respuesta = f"📍 *{ubicacion['nombre']}*\n\n"
+        respuesta += f"🏢 *Plaza:* {ubicacion['plaza']}\n"
+        respuesta += f"📮 *Dirección:* {ubicacion['direccion']}\n"
+        respuesta += f"📦 *C.P.:* {ubicacion['cp']}\n"
+        respuesta += f"🏙️ *Ciudad:* {ubicacion['ciudad']}\n"
+        respuesta += f"🗺️ *Google Maps:* {ubicacion['maps']}\n\n"
+        respuesta += "¿Necesitas información de otra ubicación?"
+        
+        return respuesta
+
+    def _mostrar_ubicaciones_ciudad(self, ciudad, ubicaciones):
+        """Muestra todas las ubicaciones de una ciudad"""
+        respuesta = f"📍 *UBICACIONES EN {ciudad.upper()}*\n\n"
+        
+        for ubicacion_key in ubicaciones:
+            ubicacion = self.ubicaciones[ubicacion_key]
+            respuesta += f"🏢 *{ubicacion['nombre']}*\n"
+            respuesta += f"📮 {ubicacion['direccion']}\n"
+            respuesta += f"🗺️ {ubicacion['maps']}\n\n"
+        
+        respuesta += "¿Te interesa alguna en específico?"
+        return respuesta
+
+    def _ofrecer_ayuda_ubicaciones(self):
+        """Ofrece ayuda para encontrar ubicaciones"""
+        respuesta = "📍 *UBICACIONES ARGO*\n\n"
+        respuesta += "Puedo ayudarte a encontrar nuestras ubicaciones. Puedes preguntar por:\n\n"
+        respuesta += "• 'Ubicaciones en [ciudad]' (ej: Ubicaciones en Veracruz)\n"
+        respuesta += "• 'Almacén [nombre]' (ej: Almacén Ulúa)\n"
+        respuesta += "• 'Todas las ubicaciones'\n"
+        respuesta += "• 'Ubicación más cercana'\n\n"
+        respuesta += "¿En qué te puedo ayudar?"
+        
+        return respuesta
+
+    def procesar_ubicacion_usuario(self, ciudad, user_id):
+        """Procesa la ubicación proporcionada por el usuario"""
+        ciudad_lower = ciudad.lower()
+        
+        # Buscar ubicaciones en esa ciudad
+        ubicaciones_encontradas = []
+        
+        for ciudad_map, ubicaciones in self.ciudades_ubicaciones.items():
+            if ciudad_lower in ciudad_map:
+                ubicaciones_encontradas.extend(ubicaciones)
+        
+        # También buscar en las ciudades de las ubicaciones
+        for ubicacion_key, datos in self.ubicaciones.items():
+            if ciudad_lower in datos['ciudad'].lower():
+                ubicaciones_encontradas.append(ubicacion_key)
+        
+        if ubicaciones_encontradas:
+            if len(ubicaciones_encontradas) == 1:
+                return self._mostrar_detalles_completos(ubicaciones_encontradas[0])
             else:
-                return []
-                
-        except Exception as e:
-            logger.error(f"Error obteniendo todas las ubicaciones: {str(e)}")
-            return []
+                return self._mostrar_ubicaciones_ciudad(ciudad, ubicaciones_encontradas)
+        else:
+            return f"No tenemos ubicaciones en {ciudad}. Te recomiendo consultar nuestras ubicaciones disponibles."

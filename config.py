@@ -38,61 +38,18 @@ EMPRESA_INFO = {
 
 # Contexto general para el asistente
 CONTEXTO_GENERAL = f"""Eres ALMAssist, el asistente virtual de {EMPRESA_INFO['nombre']}. 
-Eres especializado en proporcionar información sobre nuestros servicios de almacenamiento y logística.
-
-Información de la empresa:
-- Nombre: {EMPRESA_INFO['nombre']}
-- Servicios: {', '.join(EMPRESA_INFO['servicios'])}
-- Ubicaciones: {', '.join(EMPRESA_INFO['ubicaciones'])}
-- Contacto: Teléfono: {EMPRESA_INFO['contacto']['telefono']}, Email: {EMPRESA_INFO['contacto']['email']}
-
-Responde de manera:
-✅ Natural y conversacional
-✅ Informativa y precisa
-✅ Amable y servicial
-✅ Concisa pero completa
-
-Si no sabes algo, admítelo amablemente."""
+En ARGO ofrecemos soluciones integrales de almacenaje,
+logística y comercio exterior para optimizar tu cadena de suministro y reducir tiempos y costos.
+Con más de 34 años de experiencia y una infraestructura especializada en puntos estratégicos de
+la República Mexicana, buscamos ser más que un proveedor, un aliado estratégico de nuestros
+clientes. Contamos con la autorización de la Secretaría de Hacienda y Crédito Público (SHCP) para
+operar como Almacén General de Depósito y ofrecer el servicio de almacenaje de mercancía
+nacional o de importación (Almacén Fiscal) amparadas por Certificados de Depósito; ya sea en
+nuestros almacenes operados de forma directa o mediante un esquema de Habilitación de
+instalaciones de terceros (almacenes, bodegas, silos, entre otros)."""
 
 # Función para actualizar el contexto con ubicaciones desde el módulo
 def actualizar_contexto_con_ubicaciones(db_manager):
     """Actualiza el contexto general con las ubicaciones desde el módulo"""
-    global CONTEXTO_GENERAL, EMPRESA_INFO
     
-    try:
-        # Importar y crear instancia temporal del módulo
-        from modules.ubicaciones_module import UbicacionesModule
-        from utils.context_manager import ContextManager
-        
-        # Crear instancia temporal del módulo
-        context_manager_temp = ContextManager()
-        ubicaciones_module = UbicacionesModule(db_manager, context_manager_temp)
-        
-        # Usar el método del módulo para obtener todas las ubicaciones
-        ubicaciones = ubicaciones_module.obtener_todas_las_ubicaciones()
-        
-        # Si no se obtuvieron ubicaciones, usar valores por defecto
-        if not ubicaciones:
-            ubicaciones = ["Ciudad de México", "Guadalajara", "Monterrey"]
-            
-    except ImportError as e:
-        print(f"Error importando módulo de ubicaciones: {str(e)}")
-        ubicaciones = ["Ciudad de México", "Guadalajara", "Monterrey"]
-    except Exception as e:
-        print(f"Error usando módulo de ubicaciones: {str(e)}")
-        ubicaciones = ["Ciudad de México", "Guadalajara", "Monterrey"]
-    
-    # Actualizar la información de la empresa
-    EMPRESA_INFO["ubicaciones"] = ubicaciones
-    
-    # Actualizar el contexto general
-    CONTEXTO_GENERAL = CONTEXTO_GENERAL_TEMPLATE.format(
-        nombre=EMPRESA_INFO['nombre'],
-        servicios=', '.join(EMPRESA_INFO['servicios']),
-        ubicaciones=', '.join(ubicaciones),
-        telefono=EMPRESA_INFO['contacto']['telefono'],
-        email=EMPRESA_INFO['contacto']['email']
-    )
-    
-    print(f"Contexto actualizado con {len(ubicaciones)} ubicaciones desde el módulo")
     return CONTEXTO_GENERAL
