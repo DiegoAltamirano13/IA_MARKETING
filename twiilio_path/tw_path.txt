@@ -24,7 +24,14 @@ KE7NEVPX7N
 VK2BDAKZ42
 JARSM2KBX6
 
+git remote set-url origin https://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@github.com/DiegoAltamirano13/IA_MARKETING.git
+git remote add origin https://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@github.com/DiegoAltamirano13/IA_MARKETING.git
+
+git config --global user.email "arcuos1113@gmail.com"
+git config --global user.name "DiegoAltamirano13"
+git add .
+git commit -m "mensaje"
 git remote set-url origin https://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@github.com/DiegoAltamirano13/IA_MARKETING.git
-git remote add origin https://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@github.com/DiegoAltamirano13/IA_MARKETING.git
+git push origin master 
 
 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
